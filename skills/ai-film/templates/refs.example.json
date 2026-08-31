@@ -1,0 +1,11 @@
+{
+  "_comment": "Copy to refs.json. Keys are referenced by REF_KEY in your shots module. Two or more photographs per person, at different angles and lighting: one photograph degrades into a type rather than a person.",
+  "driver": [
+    "https://your-cdn.example/driver-frontal.jpg",
+    "https://your-cdn.example/driver-three-quarter.jpg"
+  ],
+  "passenger": [
+    "https://your-cdn.example/passenger-frontal.jpg",
+    "https://your-cdn.example/passenger-three-quarter.jpg"
+  ]
+}

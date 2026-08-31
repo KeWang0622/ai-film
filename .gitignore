@@ -1,0 +1,24 @@
+# Renders and post-production output — never commit media
+out_*/
+audit_*/
+.refcache/
+*.mp4
+*.mp3
+*.wav
+*.srt
+*.ass
+
+# Credentials and machine-local config
+refs.json
+.upload-cache-*.json
+links.json
+.env
+*.pem
+*.key
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
+.ruff_cache/
