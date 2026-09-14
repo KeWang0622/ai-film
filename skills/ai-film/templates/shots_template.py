@@ -32,9 +32,13 @@ CONTRACT — what generate.py and finish.py read from this module:
     REF_KEY            required by audit_faces.py. character -> refs.json key
     RESOLUTION / RATIO / BITRATE_MODE / GENERATE_AUDIO   optional, defaults shown
     LANG               optional. "zh" (default) or "en" — picks the subtitle font
-    FADES              optional. shot id -> (fade_in_s, fade_out_s)
+    FADES              optional. shot id -> (fade_in_s, fade_out_s); PICTURE ONLY
     NAME_CARDS         optional. burned-in cards; opt-in only
     MUSIC_PROMPT       optional. overrides the default score brief
+    SCORE              optional. False skips scoring entirely (default True)
+    MONOCHROME         optional. True forces a panchromatic B&W conversion in post
+    GRAIN              optional. ffmpeg noise strength added in post (0 = none)
+    CAUSAL_CHAIN       optional but linted. [(fact, phrase that must be spoken)]
 
 Shot schema:
 
@@ -54,6 +58,25 @@ RATIO = "21:9"
 BITRATE_MODE = "high"
 GENERATE_AUDIO = True
 LANG = "zh"
+
+# Black and white is demanded in the prompt AND enforced in post: whole shots have
+# come back in colour under a "black and white" prompt. Grain goes on in post so
+# it is uniform from cut to cut; 5-6 reads as 1940s stock, 2 as modern digital.
+MONOCHROME = False
+GRAIN = 0
+
+# Dialogue-driven shorts usually play better unscored - viewers have rejected a
+# ducked score as competing with the lines. Opt in deliberately.
+SCORE = False
+
+# The facts a first-time viewer needs, each paired with the phrase that says it
+# aloud. check_script.py errors on any fact nobody speaks. Write this BEFORE the
+# shots: if a fact has no line, the audience does not have it.
+CAUSAL_CHAIN: list[tuple[str, str]] = [
+    # ("the rule of the world", "nobody leaves without papers"),
+    # ("who she is to him",     "eight years since"),
+    # ("how he gets out",       "my own exit visa"),     # count every resource
+]
 
 # ── Photographic texture. Global. Says nothing about composition — that is each
 #    shot's job.
@@ -152,6 +175,18 @@ AUDIO_RULE = (
     "ABSOLUTELY NO music score, NO orchestral score, NO underscore, NO stings, NO singing."
 )
 
+# ── The line the film is remembered for. One line among four in 12s is thrown
+#    away; it needs its own shot, at most three lines, and silence either side.
+#    Measured on a shot built this way: 3.5s silence, the line, 4.25s silence -
+#    73% of the shot without speech.
+KEY_LINE = (
+    "PACING - CRITICAL: spoken VERY SLOWLY. A LONG SILENCE of several seconds before "
+    "the first line, a clear pause between lines, and a LONG SILENCE after the last "
+    "line in which nobody speaks and nobody moves. The line <LINE> is the most "
+    "important line in the film: spoken CLEARLY and DISTINCTLY, every word fully "
+    "articulated at normal volume - not muttered, not rushed, not swallowed at the end. "
+)
+
 # ── Title and end cards must declare silence explicitly. With nothing to say the
 #    model invents ambience or music and trips the same copyright filter.
 SILENT = (
@@ -207,8 +242,11 @@ SHOTS: list[dict] = [
 
 TOTAL_S = sum(s["duration"] for s in SHOTS)
 
-# ── Transitions. ~95% hard cuts. Dip to black only for a time ellipsis or an act
-#    boundary. Fades are applied inside each clip, so the runtime stays exact.
+# ── Transitions. Hard cut inside a scene; dip to black at EVERY jump in time or
+#    place (into and out of a flashback, night to dawn, one city to another).
+#    Three unmarked jumps on hard cuts made a film read as if it skipped.
+#    Dips are PICTURE-ONLY: sound carries through, so a line that starts at 0.00s
+#    of the next shot keeps its first word. Applied inside each clip; runtime exact.
 FADES: dict[str, tuple[float, float]] = {
     # "<xx>-00-title": (1.0, 0.6),
 }

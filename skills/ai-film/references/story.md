@@ -137,12 +137,14 @@ read as beautiful nonsense.
 
 ## Working with real people and existing IP
 
-- Genre premises and historical events are free to use: a shipwreck, a class
-  divide, spies married to each other, time dilation. Specific characters, plots,
-  dialogue and distinctive scenes from an existing film are not.
-- Write original characters, original beats, original dialogue, and an original
-  recurring object. State this in the module docstring so it stays true as the
-  script evolves.
+- Genre premises, historical events and plot ideas are free to use: a shipwreck, a
+  class divide, spies married to each other, time dilation. Titles and short
+  phrases are not copyrightable. Extended dialogue and specific written scenes are.
+- For an original film, write original characters, beats, dialogue and recurring
+  object, and state that in the module docstring so it stays true as the script
+  evolves.
+- For a remake, keep the beats and the iconography, quote at most a famous short
+  line or two, and write every other line fresh. See "Remakes" below.
 - When the leads are real people from supplied photos, assume consent for the
   photos you were given and say so once — do not build likenesses of people who
   did not supply them.
@@ -276,3 +278,103 @@ of the object in frame, the direction of the camera move.
 
 Falling things rhyme especially well: blossom → snow, and the paper cards that open
 and close the film can carry the same pair.
+
+---
+
+# Additions from two remakes and a recut
+
+## The stranger audit
+
+A remake passed every technical check and still lost its audience: *"If I'm
+watching this for the first time, I don't know what's going on."* The fix was not
+in the pictures. Every break was a fact nobody said out loud.
+
+| What a first-time viewer hit | What was missing |
+|---|---|
+| Hands on a café table in the rain — whose, where, when? | The flashback's city was first named **five shots after** the flashback |
+| Who is she? | The heroine's name was **never spoken** in the whole film; the hero's, four times |
+| Why do these papers matter? | Nobody ever said you cannot leave the city without them |
+| Wait — how did he get on the plane? | Three people left on **two** travel permits |
+| Did we skip something? | Night-to-dawn and airfield-to-another-country happened on hard cuts |
+
+Run it every time, before rendering and again after the first cut:
+
+```
+1. Write CAUSAL_CHAIN in the shot script: every fact a stranger needs, paired with
+   the phrase that says it. check_script.py errors on a fact nobody speaks.
+2. check_script.py --script — read ONLY the dialogue, top to bottom, cold.
+3. Name every lead aloud in the first third.
+4. Name the place and time of a flashback in the scene that leads INTO it.
+5. Dip to black at every jump in time or place; hard cut only inside a scene.
+```
+
+When a viewer says they are confused, do not re-time, re-grade or add music. Find
+the fact nobody said, and have somebody say it.
+
+## Count the resources out loud
+
+If the plot turns on something countable — tickets, seats, doses, letters, bullets —
+the audience does the arithmetic whether you meant them to or not. The climax of one
+remake handed out two travel permits and then put three people on the aeroplane. It
+read as *"what the heck?"*, not as romance.
+
+The repair has three parts, and all three have to be spoken:
+
+```
+ASSIGN     at the climax, say whose each one is
+           "Two letters. This one is yours. This one is hers."
+ASK        let a character voice the audience's question
+           "There were only ever two. You haven't got anything."
+ANSWER     with something planted in the first half
+           "I've had my own exit visa in a drawer for two years."
+PLANT      (mid-film)  "You could have left this city any time in eight years."
+                       "And gone where?"
+```
+
+The plant is what stops the answer feeling like a cheat — and here it deepened the
+character: he never lacked a way out, only somewhere to go.
+
+## Remakes: a happy ending on a tragic source
+
+When the source ends in renunciation and the brief is a happy ending, do not delete
+the sacrifice — it is usually why the source is loved. **Move it to another
+character.** In one remake the husband, not the hero, gives up his claim, and does
+it as an unseen voice, a hand and a hat.
+
+Then **recount the logistics**, because moving the sacrifice changes who needs what.
+That recount is exactly where the three-people-on-two-permits hole came from.
+
+Keep the source's visual signature where the audience will look for it: the fog, the
+aeroplane with its propellers turning, the trench coat and the hat pushed back off
+the face. Invert only the outcome. A remake that keeps the staging and changes the
+ending reads as homage; one that changes the staging reads as a different film.
+
+## The line the film is remembered for needs its own shot
+
+A famous line placed fourth among four lines in a 12-second shot went by in a second
+and a half. The viewer: *"Too fast, too short, gone before it lands."*
+
+Give it a dedicated shot: the tightest framing in the film, at most three lines, and
+direct the silence explicitly — "a LONG SILENCE of several seconds before the first
+line … a LONG SILENCE after the last". Measured on the rebuilt shot: **3.5 s of
+silence, the line, 4.25 s of silence** — 73% of the shot without speech. Then make
+the next lines *about* the line ("You said that to me in Paris." / "I meant it in
+Paris.") so the film itself points at it.
+
+Plant it earlier too, where the source does. A line heard once is dialogue; heard a
+second time, in a different place, it is a theme.
+
+## A flashback without faces must be anchored before it starts
+
+Shooting the leads' past as hands, glasses and rain avoids de-aging and looks
+beautiful — and on its own it reads as nothing at all. The scene before it has to
+name the place and the time ("Eight years." / "Eight years since Paris."), and the
+flashback's own lines should name the place again. After that fix the same images
+read instantly as memory.
+
+## Comedy of a long marriage: make the number big
+
+A spy-marriage comedy recast with leads in their seventies changed "married five or
+six years" to **forty-one**. It is funnier and it hurts more: four decades of
+answering "How was your day?" with a lie. Ageing the premise to fit the actors
+beats ageing the actors to fit the premise, every time.

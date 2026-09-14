@@ -29,17 +29,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-# The generation SDK lives outside this repo. Point AI_FILM_SDK at it, or drop
-# this file next to the SDK package. Post-production works without it; only
-# score generation and transcription need the network.
-_sdk = os.environ.get("AI_FILM_SDK")
-if _sdk:
-    sys.path.insert(0, _sdk)
-try:
-    from pika_api import PikaClient, load_config
-    from pika_api.assets import download, find_asset_url
-except ImportError:  # post-only runs do not need the SDK
-    PikaClient = load_config = download = find_asset_url = None  # type: ignore
+# Network calls (score, transcription) go through the bundled stdlib client.
+# Pure post-production never touches it, so no key is needed to re-cut.
+from pika_client import Pika  # noqa: E402
+from deliver import loudnorm_linear  # noqa: E402
+
+# Panchromatic conversion plus a silver-gelatin curve. NOT `hue=s=0`, which reads
+# as drained colour rather than black-and-white stock. Applied to every clip of a
+# MONOCHROME project whatever the model returned: "the prompt said black and
+# white" has failed in whole shots before.
+MONO_FILTER = ("colorchannelmixer=.42:.48:.10:0:.42:.48:.10:0:.42:.48:.10:0,"
+               "curves=all='0/0 0.22/0.16 0.5/0.52 0.78/0.86 1/1'")
 
 
 # ── Project loading ─────────────────────────────────────────────────────────
@@ -200,7 +200,9 @@ def subtitle_filter(srt: Path, project: str) -> str:
 
 ROOT = Path(__file__).resolve().parent
 CLIPS = ROOT / "out"
-MUSIC_API = "pika/pika-audio/pika-music"
+# pika-music is deprecated for this work; MiniMax instrumental measured USD 0.09/call,
+# ~105s per cue, no duration control - generate two cues and crossfade at the turn.
+MUSIC_API = "minimax/minimax-music-3.0/text-to-audio"
 
 # Prompt direction matters more than the model. An earlier brief asked for
 # "restrained, sparse solo piano, never bombastic" and came back cold and
@@ -250,21 +252,37 @@ def concat(project: str) -> Path:
         else:
             print(f"warning: missing {shot['id']}, skipping", file=sys.stderr)
 
+    mono = bool(_attr(project, "MONOCHROME", False))
+    grain = int(_attr(project, "GRAIN", 0))
     inputs: list[str] = []
     graph: list[str] = []
     labels: list[str] = []
+    last = len(clips) - 1
     for i, (clip, shot) in enumerate(zip(clips, shots)):
         inputs += ["-i", str(clip)]
         fade_in, fade_out = fades(project).get(shot["id"], (0.0, 0.0))
+        # Real duration, not declared: clips render ~0.06s long, and a fade timed
+        # from the declared length finishes early.
+        dur = _probe_duration(clip)
         v = [f"[{i}:v]setpts=PTS-STARTPTS", "format=yuv420p"]
+        if mono:
+            v += [MONO_FILTER, "format=yuv420p"]
+        if grain:
+            # grain in post is uniform across every shot; asked of the model, it
+            # changes texture from cut to cut
+            v += [f"noise=alls={grain}:allf=t+u", "format=yuv420p"]
         a = [f"[{i}:a]asetpts=PTS-STARTPTS", "aresample=48000"]
         if fade_in:
             v.append(f"fade=t=in:st=0:d={fade_in}:color=black")
-            a.append(f"afade=t=in:st=0:d={fade_in}")
         if fade_out:
-            st = shot["duration"] - fade_out
-            v.append(f"fade=t=out:st={st}:d={fade_out}:color=black")
-            a.append(f"afade=t=out:st={st}:d={fade_out}")
+            v.append(f"fade=t=out:st={max(0.0, dur - fade_out):.3f}:d={fade_out}:color=black")
+        # DIPS ARE PICTURE-ONLY. A measured line started at 0.00s of the shot after
+        # a dip; an audio fade-in there swallows its first word. Sound carries
+        # straight through every transition; only the film's own head and tail fade.
+        if i == 0 and fade_in:
+            a.append(f"afade=t=in:st=0:d={min(fade_in, 0.5)}")
+        if i == last and fade_out:
+            a.append(f"afade=t=out:st={max(0.0, dur - fade_out):.3f}:d={fade_out}")
         graph.append(",".join(v) + f"[v{i}]")
         graph.append(",".join(a) + f"[a{i}]")
         labels += [f"[v{i}]", f"[a{i}]"]
@@ -277,30 +295,46 @@ def concat(project: str) -> Path:
         *inputs,
         "-filter_complex", ";".join(graph),
         "-map", "[v]", "-map", "[a]",
-        "-c:v", "libx264", "-preset", "slow", "-crf", "16",
-        "-pix_fmt", "yuv420p", "-profile:v", "high",
-        "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+        *_x264(project),
+        "-c:a", "aac", "-b:a", "256k", "-ar", "48000",
         str(raw),
     ])
     return raw
 
 
+def _probe_duration(path: Path) -> float:
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                          "-of", "csv=p=0", str(path)], capture_output=True, text=True).stdout
+    return float(out.strip())
+
+
+def _x264(project: str) -> list[str]:
+    """Master-grade video settings. `-tune grain` whenever there is grain to keep:
+    x264 otherwise smooths it as noise, and the banding it was hiding comes back."""
+    args = ["-c:v", "libx264", "-preset", "slow", "-crf", "14",
+            "-pix_fmt", "yuv420p", "-profile:v", "high"]
+    if _attr(project, "GRAIN", 0) or _attr(project, "MONOCHROME", False):
+        args += ["-tune", "grain"]
+    return args
+
+
 def make_music(seconds: int, prompt: str = "", out: Path | None = None) -> Path | None:
-    client = PikaClient(load_config())
-    payload = {"prompt": prompt or MUSIC_PROMPT, "duration": float(seconds), "mode": "text_to_music"}
-    print(f"generating {seconds}s of score…", flush=True)
-    try:
-        job = client.submit(MUSIC_API, payload)
-        finished = client.wait(job.request_id, poll_interval_s=8.0, max_wait_s=900.0)
-        result = finished.raw.get("output") or client.content(job.request_id)
-    except Exception as exc:
-        print(f"score generation failed, skipping: {exc}", file=sys.stderr)
-        return None
-    url = find_asset_url(result)
+    client = Pika()
+    payload = {"prompt": prompt or MUSIC_PROMPT, "is_instrumental": True,
+               "audio_setting": {"sample_rate": 44100, "bitrate": 256000, "format": "mp3"}}
+    print(f"generating score for a {seconds}s film…", flush=True)
+    job = None
+    for attempt in range(3):  # provider_timeout bills nothing; retry unchanged
+        try:
+            job = client.run(MUSIC_API, payload, timeout_s=900)
+            break
+        except Exception as exc:
+            print(f"score attempt {attempt + 1} failed: {exc}", file=sys.stderr)
+    url = Pika.asset_url(job) if job else None
     if not url:
-        print("score returned no asset URL, skipping", file=sys.stderr)
+        print("no score produced, skipping", file=sys.stderr)
         return None
-    return download(url, out or ROOT / "score.mp3")
+    return client.download(url, out or ROOT / "score.mp3")
 
 
 def _envelope(clip: Path) -> tuple[list[float], float]:
@@ -499,8 +533,6 @@ def scribe_words(video: Path, project: str) -> list[dict] | None:
     10+ seconds out (one line measured at 30.15s was actually spoken at 37.30s).
     After highpass + compand + loudnorm, word timings land within ~0.2s.
     """
-    from pika_api.uploads import upload_file
-
     wav = ROOT / ".scribe.wav"
     run([
         "ffmpeg", "-v", "error", "-y", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000",
@@ -510,14 +542,14 @@ def scribe_words(video: Path, project: str) -> list[dict] | None:
         "-c:a", "pcm_s16le", str(wav),
     ])
     try:
-        client = PikaClient(load_config())
-        url = upload_file(client, wav)
-        job = client.submit(
+        client = Pika()
+        url = client.upload(wav)
+        job = client.run(
             "elevenlabs/eleven-scribe/transcription",
             {"audio_url": url, "duration_seconds": float(_total(project)), "diarize": True},
+            timeout_s=900,
         )
-        finished = client.wait(job.request_id, poll_interval_s=5.0, max_wait_s=900.0)
-        result = finished.raw.get("output") or client.content(job.request_id)
+        result = client.result(job)
     except Exception as exc:
         print(f"transcription failed, falling back to peak anchoring: {exc}", file=sys.stderr)
         return None
@@ -694,18 +726,16 @@ def build_srt_from_shots(project: str, raw_video: Path | None = None) -> Path:
 
 def make_srt(video: Path, project: str) -> Path | None:
     """Extract audio, upload, transcribe to SRT. A real timeline, not an estimate."""
-    from pika_api.uploads import upload_file
-
     wav = ROOT / ".dialogue.wav"
     run([
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
         "-i", str(video), "-vn", "-ac", "1", "-ar", "16000", str(wav),
     ])
-    client = PikaClient(load_config())
+    client = Pika()
     print("transcribing…", flush=True)
     try:
-        url = upload_file(client, wav)
-        job = client.submit(
+        url = client.upload(wav)
+        job = client.run(
             "openai/whisper/transcription",
             {
                 "audio_url": url,
@@ -714,8 +744,7 @@ def make_srt(video: Path, project: str) -> Path | None:
                 "response_format": "srt",
             },
         )
-        finished = client.wait(job.request_id, poll_interval_s=5.0, max_wait_s=600.0)
-        result = finished.raw.get("output") or client.content(job.request_id)
+        result = client.result(job)
     except Exception as exc:
         print(f"transcription failed, skipping subtitles: {exc}", file=sys.stderr)
         return None
@@ -875,6 +904,7 @@ def mix(video: Path, music: Path, out: Path, project: str, srt: Path | None = No
         stages.append(subtitle_filter(srt, project))
     has_video_fx = bool(stages)
     video_chain = f"[0:v]{','.join(stages)}[vout];" if has_video_fx else ""
+    premix = out.with_suffix(".premix.mkv")
     run([
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
         "-i", str(video), "-i", str(music),
@@ -893,14 +923,15 @@ def mix(video: Path, music: Path, out: Path, project: str, srt: Path | None = No
         "equalizer=f=3000:t=q:w=1.2:g=2,asplit=2[dry][key];"
         f"[1:a]volume=-18dB,afade=t=in:st=0:d=4,afade=t=out:st={_total(project) - 6}:d=6[bed];"
         "[bed][key]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=600[ducked];"
-        "[dry][ducked]amix=inputs=2:duration=first:dropout_transition=0,"
-        "loudnorm=I=-16:TP=-1.5:LRA=11[aout]",
+        "[dry][ducked]amix=inputs=2:duration=first:dropout_transition=0[aout]",
         "-map", "[vout]" if has_video_fx else "0:v", "-map", "[aout]",
-        "-c:v", "libx264", "-preset", "slow", "-crf", "16",
-        "-pix_fmt", "yuv420p", "-profile:v", "high",
-        "-c:a", "aac", "-b:a", "192k",
-        str(out),
+        # nothing burned in -> copy the stream and keep the picture first-generation
+        *(_x264(project) if has_video_fx else ["-c:v", "copy"]),
+        "-c:a", "pcm_s16le",   # lossless until the one final audio encode
+        str(premix),
     ])
+    loudnorm_linear(premix, out)
+    premix.unlink(missing_ok=True)
     return out
 
 
@@ -920,19 +951,19 @@ def main(argv: list[str]) -> int:
     raw = concat(project)
     print(f"concatenated -> {raw.name}")
 
-    if args.no_music:
+    # A project can opt out of scoring entirely. For dialogue-driven shorts that is
+    # usually right: viewers have rejected a sidechain-ducked score as competing
+    # with the lines even when speech held 70-80% of the spectrum.
+    if args.no_music or not _attr(project, "SCORE", True):
         # A no-music cut needs MORE denoising, not less: with no score to mask it,
         # the generated ambience floor is exposed. Returning right after concat
         # here — which an earlier version did — is exactly backwards.
         out = ROOT / f"{project}-nomusic.mp4"
-        run([
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(raw),
-            "-af", "highpass=f=85,afftdn=nf=-26:tn=1,"
-                   "equalizer=f=3000:t=q:w=1.2:g=2,"
-                   "loudnorm=I=-16:TP=-1.5:LRA=11",
-            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", str(out),
-        ])
-        print(f"no-music cut -> {out}")
+        # TWO-PASS LINEAR. Single-pass loudnorm compresses dynamically and lifted a
+        # silent title card ~25 dB into hiss. Video is stream-copied: first generation.
+        loudnorm_linear(raw, out, pre="highpass=f=85,afftdn=nf=-26:tn=1,"
+                                      "equalizer=f=3000:t=q:w=1.2:g=2")
+        print(f"no-music cut -> {out}   (next: ./verify_film.py, ./deliver.py)")
         return 0
 
     srt: Path | None = None

@@ -22,11 +22,30 @@ a *type* — "a bald bearded older white man" instead of the actual person. Supp
 two real photos at different angles and lighting fixed it immediately.
 
 ```python
-refs["zac_real"] = [close_portrait_url, group_photo_crop_url]
+refs["omar_real"] = [close_portrait_url, group_photo_crop_url]
 # casting block emits: "@Image1, @Image2 are ALL THE SAME PERSON: ..."
 ```
 
-The endpoint accepts up to 30 images. There is no reason to give it one.
+The endpoint accepts up to 30 images. Give it two when two exist.
+
+**One clean frontal photo can hold, under conditions.** A lead with a single
+chest-up, front-on phone photo read as herself in every shot she appeared in across
+two full films, after two reruns, when:
+
+- a hardware anchor was in the photo and named in every shot (dark **oval** frames,
+  against the other lead's **round** ones);
+- faces were framed large, front-on or three-quarter — no profiles, no turn-aways,
+  because the model has no data for the side of the head and invents it;
+- one of the films was black and white, which removes colour drift outright.
+
+The two shots that did drift were the two that broke those conditions: a busy
+medium frame with the face small, and a stand-off with a pistol sharp in the
+foreground stealing focus. What degrades into a *type* is a single **wide** photo
+with a small face — not a single photo as such.
+
+**Test the thin reference front-on.** The first test frame of that lead was a
+three-quarter profile, which cannot verify anything; a second 5-second render,
+face-on and large, settled it for USD 2.30.
 
 ### Whatever is in the photo will leak into the film
 
@@ -52,6 +71,26 @@ texture, no retouching.
 ```
 
 Keep the original as `alt-`, keep the clean one as `PRIMARY`.
+
+When no clean photo can be made and the leak is small, measure it rather than
+assume. Drop earrings in a lead's only photograph:
+
+| Attempt | Result |
+|---|---|
+| no mention | earrings in the first test shot |
+| `She wears NO earrings, NO jewellery` | leaked back in a longer prompt |
+| `HER EARLOBES ARE PLAINLY VISIBLE, SMOOTH AND COMPLETELY UNADORNED, with clean bare skin from the ear down to the jaw` + the negative | removed them from the leaking shot of a monochrome film; in a colour film with the same block, still present in 4 of 8 shots |
+
+Positive description beats the bare negative, and neither is a guarantee. Decide
+whether it matters to the person before spending four reruns on it.
+
+### Hats, and anything else that covers the anchor
+
+A fedora and a brimmed hat held both faces through a whole airfield sequence once
+the prompt said where the hat sits: *"a dark felt fedora pushed back off his
+forehead so that his white hair and his round tortoiseshell glasses are both
+plainly visible … neither hat covers either face at any point."* A hat left
+unplaced drifts down over the glasses, and the glasses are the identity.
 
 ---
 
@@ -218,9 +257,9 @@ leak, and which films they are in.
 {
   "omar": {
     "name": "Omar", "height_cm": 190,
-    "ref": "zac_real",
+    "ref": "omar_real",
     "alt_refs": {"christmas group crop": "husband"},
-    "deprecated": {"zac_young": "de-aged generation — loses the person"},
+    "deprecated": {"omar_young": "de-aged generation — loses the person"},
     "anchor": "bald + grey beard + build; a full head taller than her",
     "warn": "a single wide reference degrades into a generic older man — use both real photos",
     "films": ["The Word for It"]
@@ -233,3 +272,27 @@ to stoop to meet whose eyeline. That is worth more than any adjective.
 
 Store every reference image in one place, one folder per person, `PRIMARY` /
 `alt-` / `DEPRECATED-` prefixes, plus a manifest with the hosted URLs.
+
+---
+
+## 8. Wardrobe continuity is measurable
+
+A shot rerun to fix focus came back with both leads in different clothes: his white
+dinner jacket went dark, her suit jacket became a knit top. Nobody changes clothes
+mid-scene, and nobody watching forgives it.
+
+Two rules came out of it:
+
+1. **Restate wardrobe inside any shot whose prompt you lengthen**, written as
+   continuity: *"WARDROBE CONTINUITY — unchanged from every other scene: he wears his
+   white dinner jacket, clearly the brightest thing in frame …"*.
+2. **Measure it.** Mean luminance of the costume region at mid-shot is enough for a
+   white or black garment: 15 in the broken take, 128 in a good one, 144 after the
+   fix. It takes one line of OpenCV and catches the swap before a person does.
+
+## 9. Never ask for photographs of people as set dressing
+
+A title shot tracked past "a row of framed family photographs" and rendered them
+as smiling portraits of two strangers — in the opening image of a film about two
+specific people. The model will not leave a photo frame empty and will not put your
+cast in it. Dress walls with things that have no face.

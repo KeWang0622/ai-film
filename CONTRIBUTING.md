@@ -42,6 +42,13 @@ A rule earns its place when it changes what someone does. Prefer:
   ./check_script.py --project lastrun --strict
   ```
 
+- **No dollar sign followed by a digit in `SKILL.md`.** When the skill is invoked with
+  arguments that sequence is substituted as a positional placeholder, and the price
+  becomes a word of the user's request. Write `USD 0.45`. The references are not
+  substituted, but keep them consistent.
+- **Measure a claim before you write it down.** If a number in the docs came from a
+  controlled test rather than a real film, say which.
+
 ## Out of scope
 
 - Anything that helps build a likeness of a real person who did not supply the

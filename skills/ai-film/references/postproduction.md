@@ -8,16 +8,15 @@ lives here.
 Use the concat **filter**, not the demuxer.
 
 ```python
-# per input i: normalise timestamps, apply this clip's fades
+# per input i: normalise timestamps, grade, then fade the PICTURE only
+dur = probe_duration(clip)                      # real, not declared: clips run ~0.06s long
 v = [f"[{i}:v]setpts=PTS-STARTPTS", "format=yuv420p"]
+if MONOCHROME: v += [MONO_FILTER, "format=yuv420p"]
+if GRAIN:      v += [f"noise=alls={GRAIN}:allf=t+u", "format=yuv420p"]
+if fade_in:    v.append(f"fade=t=in:st=0:d={fade_in}:color=black")
+if fade_out:   v.append(f"fade=t=out:st={dur - fade_out:.3f}:d={fade_out}:color=black")
 a = [f"[{i}:a]asetpts=PTS-STARTPTS", "aresample=48000"]
-if fade_in:
-    v.append(f"fade=t=in:st=0:d={fade_in}:color=black")
-    a.append(f"afade=t=in:st=0:d={fade_in}")
-if fade_out:
-    st = shot["duration"] - fade_out
-    v.append(f"fade=t=out:st={st}:d={fade_out}:color=black")
-    a.append(f"afade=t=out:st={st}:d={fade_out}")
+# audio fades ONLY at the head of the film and the tail of the film
 ...
 graph.append("".join(labels) + f"concat=n={n}:v=1:a=1[v][a]")
 ```
@@ -51,6 +50,28 @@ FADES = {
 
 Everything not listed is a hard cut, including disaster and immediate aftermath —
 a transition there telegraphs the event and kills the impact.
+
+### Dips are picture-only
+
+The earlier recipe faded audio with the picture. Measured on a real film, the first
+line of the shot after a dip began at **0.00 s**; a 0.35 s audio fade-in sits right
+on top of it. In a controlled test that fade took **17 dB** off the first syllable,
+while the picture dip looked identical with or without it.
+
+```
+fade the image at every dip; never fade the audio at a clip boundary
+fade the audio only at the very head and the very tail of the film
+```
+
+Sound carrying through a cut to black is ordinary film grammar, and nobody hears
+the join. Check it anyway: `verify_film.py` prints speech energy in the first
+0.35 s after every dip and marks any shot where a line starts there.
+
+### Where the dips go
+
+Hard cut inside a scene. **Dip at every jump in time or place** — into a flashback
+and out of it, night to dawn, one country to another. A recut that left three such
+jumps on hard cuts read to its first viewer as though the film had skipped.
 
 ## Subtitles
 
@@ -164,8 +185,12 @@ line; falling back to `rows[-1]` deletes the first line entirely.
 
 ## Score and mix
 
-Generate the score separately (`pika/pika-audio/pika-music`, $0.015/min) and duck
-it under the dialogue:
+**First decide whether to score at all.** On two dialogue-driven remakes the viewer
+asked for the score to be removed — even ducked, with speech holding 69–79% of the
+spectrum under it, it read as competing with the lines. Default to no score
+(`SCORE = False`) and offer one.
+
+If you do score, generate it separately and duck it under the dialogue:
 
 ```
 [0:a]asplit=2[dry][key];
@@ -225,12 +250,24 @@ floor.
 `--no-music` returning right after concat skips normalisation and denoising
 entirely, which is exactly backwards. Give it its own branch:
 
-```bash
-ffmpeg -i raw.mp4 \
-  -af "highpass=f=85,afftdn=nf=-26:tn=1,equalizer=f=3000:t=q:w=1.2:g=2,\
-loudnorm=I=-16:TP=-1.5:LRA=11" \
-  -c:v copy -c:a aac -b:a 192k out-nomusic.mp4
+```python
+# two-pass LINEAR loudnorm - deliver.loudnorm_linear()
+pre = "highpass=f=85,afftdn=nf=-26:tn=1,equalizer=f=3000:t=q:w=1.2:g=2"
+loudnorm_linear(raw, out, pre=pre)     # pass 1 measures WITH pre; pass 2 applies one gain
 ```
+
+**Single-pass `loudnorm` is the wrong tool for a finished film.** It is a dynamic
+compressor, and a film's quiet passages are deliberate. Controlled test on the same
+cut:
+
+| | title (silent) | dialogue | gap |
+|---|---|---|---|
+| raw cut | −65.5 dBFS | −29.0 | 36.4 dB |
+| single-pass `loudnorm` | **−15.8** | −11.9 | **3.9 dB** |
+| two-pass `linear=true` | −51.4 | −11.5 | 39.9 dB |
+
+On a real black-and-white film the silent title card came out at −17 dBFS — audible
+hiss — single-pass, and −42 dBFS linear.
 
 ## Score generation
 
@@ -286,6 +323,32 @@ FADES = {
 have `00-title` or `09-the-door`; a duplicate key silently applies one film's
 transitions to another.
 
+## Black and white, and grain
+
+**Force it in post, whatever the prompt returned.** Whole shots have come back in
+colour under a "true black and white" prompt.
+
+```
+colorchannelmixer=.42:.48:.10:0:.42:.48:.10:0:.42:.48:.10:0     panchromatic mix
+curves=all='0/0 0.22/0.16 0.5/0.52 0.78/0.86 1/1'                  silver-gelatin curve
+```
+
+`hue=s=0` is not a substitute: it reads as drained colour footage, not as film stock.
+
+**Verify with the 95th percentile of chroma, never the mean.** A mostly neutral frame
+with one lamp and one blue door has a small mean chroma and an obvious colour
+problem. After the conversion a real 3:48 master measured p95 = 2.0 across 50
+samples; a vivid colour test clip run through the old pipeline measured 120.
+
+**Add grain in post, not in the prompt**, so its texture is identical from cut to cut
+(`noise=alls=5:allf=t+u` reads as 1940s stock; 2 as modern digital). Grain also
+breaks up the banding that fog and soft gradients produce in 8-bit video — measured
+median flat runs of 10–16 px on two films. Encode every grainy master with
+`-tune grain`, or x264 smooths it away.
+
+**Check banding away from dips.** A dip to black is one flat value across the whole
+frame; sampling frame 0 once reported a 1,663 px "band".
+
 ## Verify runtime and loudness every time
 
 ```bash
@@ -293,5 +356,10 @@ ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers
 ffmpeg -i final.mp4 -af loudnorm=print_format=summary -f null /dev/null 2>&1 | grep Input
 ```
 
-Expect the declared total ±1 s, and −15 to −17 LUFS integrated with true peak below
-−1 dBTP. A runtime that is short by 20% is the concat-demuxer bug, which exits 0.
+Expect the sum of the **real** clip durations ±0.15 s (clips render ~0.06 s longer
+than declared, so the declared total is always a little short), and −15 to −17 LUFS
+integrated with true peak below −1 dBTP. A runtime short by 20% is the
+concat-demuxer bug, which exits 0.
+
+`verify_film.py` runs runtime, colour, music-leak, banding, speech-at-dip and
+faststart checks in one pass and treats any unreadable measurement as a failure.
