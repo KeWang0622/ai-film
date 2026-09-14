@@ -10,7 +10,13 @@ A project is a module `shots_<name>.py` next to this file. See
 `shots_template.py` for the contract. Output lands in `out_<name>/`.
 
 Reference images are read from `refs.json` — a flat map of key -> URL or
-[URL, ...]. The project module decides which keys each shot needs.
+[URL, ...]. The project module decides which keys each shot needs. Upload local
+photos and print that map with:
+
+    ./pika_client.py upload refs/*.jpg > refs.json
+
+Auth: PIKA_API_KEY in the environment, or in a .env.local next to this script.
+Transport is `pika_client.py` - standard library only, nothing to install.
 """
 
 from __future__ import annotations
@@ -18,7 +24,6 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
-import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -27,19 +32,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-_sdk = os.environ.get("AI_FILM_SDK")
-if _sdk:
-    sys.path.insert(0, _sdk)
-
-# Imported defensively so --dry-run works with nothing installed: reading the
-# assembled prompts is free, and is the first thing anyone should do.
-try:
-    from pika_api import JobFailed, PikaAPIError, PikaClient, load_config
-    from pika_api.assets import download, find_asset_url
-    from pika_api.config import ConfigError
-except ImportError:  # only --dry-run is available without the SDK
-    JobFailed = PikaAPIError = ConfigError = Exception
-    PikaClient = load_config = download = find_asset_url = None
+from pika_client import JobFailed, Pika, PikaError  # noqa: E402  (stdlib only)
 
 # Shots with cast go to reference-to-video. Shots with no cast MUST go to
 # text-to-video: the reference endpoint requires at least one image and returns
@@ -50,13 +43,18 @@ API_TEXT = "bytedance/seedance-2.5/text-to-video"
 
 REFS_FILE = ROOT / "refs.json"
 
-# Conservative per-second estimate for 1080p. Reason about real spend from the
-# billing endpoint, not from list prices — a naive estimate once read 4x high.
-EST_USD_PER_SECOND = 0.45
+# Measured per-second charge at 1080p, reference- and text-to-video alike,
+# from job billing records (consistent to 0.2% across 60+ renders). Reason about
+# spend from billing, never from list prices — a naive estimate once read 4x high.
+EST_USD_PER_SECOND = 0.46
 
-# The server caps concurrent jobs. Exceeding it also makes *uploads* fail with
-# 429, which is a confusing way to discover the limit.
-DEFAULT_CONCURRENCY = 3
+# The server caps concurrent jobs (20). Exceeding it also makes *uploads* fail
+# with 429, which is a confusing way to discover the limit. Six is comfortable.
+DEFAULT_CONCURRENCY = 6
+
+# Seedance rejects prompts over 15,000 characters with a 422 - and in a batch,
+# that shot simply never renders. check_script.py errors on it before you spend.
+PROMPT_LIMIT = 15000
 
 
 def load_project(name: str):
@@ -103,38 +101,47 @@ def build_payload(film, shot: dict, refs: dict) -> dict:
     return payload
 
 
-def render(client: PikaClient, film, shot: dict, refs: dict, out_dir: Path,
-           attempts: int = 2) -> Path | None:
+def render(client: Pika, film, shot: dict, refs: dict, out_dir: Path,
+           attempts: int = 2) -> tuple[Path | None, float]:
     label = shot["id"]
+    dest = out_dir / f"{label}.mp4"
+    # Resumable: a re-run never pays twice. To re-render a take, move it aside
+    # (keep it - the rejected take is the evidence for why you changed the prompt).
+    if dest.is_file() and dest.stat().st_size > 100_000:
+        print(f"  [{label}] exists, skipped", flush=True)
+        return dest, 0.0
+
     payload = build_payload(film, shot, refs)
     api = API_REFERENCE if "image_urls" in payload else API_TEXT
-
     for attempt in range(1, attempts + 1):
         try:
-            job = client.submit(api, payload)
-            print(f"  [{label}] submitted {job.request_id}", flush=True)
-            finished = client.wait(job.request_id, poll_interval_s=10.0, max_wait_s=3000.0)
-            result = finished.raw.get("output") or client.content(job.request_id)
-        except (PikaAPIError, JobFailed, TimeoutError) as exc:
-            # `provider_timeout: exceeded max lifetime` is a ~20-minute server
-            # ceiling driven by queue load, not by shot complexity. The same
-            # prompt usually passes on a retry. Content-moderation failures will
-            # not, but the only cost of finding out is one more place in the queue.
-            print(f"  [{label}] attempt {attempt} failed: {exc}", file=sys.stderr, flush=True)
+            job_id = client.submit(api, payload)
+            print(f"  [{label}] submitted {job_id}", flush=True)
+            job = client.wait(job_id, timeout_s=3000, every_s=10)
+        except (PikaError, TimeoutError) as exc:
+            hint = getattr(exc, "diagnosis", "")
+            print(f"  [{label}] attempt {attempt} failed: {exc}"
+                  + (f"\n  [{label}] -> {hint}" if hint else ""), file=sys.stderr, flush=True)
+            # Access and payload errors will not fix themselves; do not queue again.
+            if isinstance(exc, PikaError) and not isinstance(exc, JobFailed) and hint:
+                return None, 0.0
+            # `provider_timeout` is a ~20-minute server ceiling driven by queue load,
+            # not shot complexity, and it bills nothing. Retry unchanged.
             if attempt < attempts:
                 print(f"  [{label}] retrying unchanged…", file=sys.stderr, flush=True)
                 continue
-            return None
+            return None, 0.0
 
-        url = find_asset_url(result)
+        url = Pika.asset_url(job)
         if not url:
-            print(f"  [{label}] no asset URL: {json.dumps(result)[:300]}", file=sys.stderr)
-            return None
-        path = download(url, out_dir / f"{label}.mp4")
-        print(f"  [{label}] saved {path.name} "
-              f"({path.stat().st_size / 1_048_576:.1f} MB)", flush=True)
-        return path
-    return None
+            print(f"  [{label}] no asset URL: {json.dumps(job)[:300]}", file=sys.stderr)
+            return None, 0.0
+        client.download(url, dest)
+        cost = Pika.charge_usd(job)
+        print(f"  [{label}] saved {dest.name} ({dest.stat().st_size / 1_048_576:.1f} MB, "
+              f"${cost:.2f})", flush=True)
+        return dest, cost
+    return None, 0.0
 
 
 def select(film, wanted: str) -> list[dict]:
@@ -178,32 +185,36 @@ def main(argv: list[str]) -> int:
               f"≈ ${seconds * EST_USD_PER_SECOND:.2f}")
         return 0
 
-    if PikaClient is None:
-        print("The generation SDK is not importable. Point AI_FILM_SDK at it, or use "
-              "--dry-run to inspect prompts without it.", file=sys.stderr)
-        return 2
-    try:
-        client = PikaClient(load_config())
-    except ConfigError as exc:
-        print(exc, file=sys.stderr)
+    too_long = [(s["id"], len(build_payload(film, s, refs)["prompt"])) for s in shots]
+    too_long = [(i, n) for i, n in too_long if n > PROMPT_LIMIT]
+    if too_long:
+        for sid, n in too_long:
+            print(f"  {sid}: prompt is {n} chars (limit {PROMPT_LIMIT}) - it would 422",
+                  file=sys.stderr)
         return 2
 
+    client = Pika()
     out_dir.mkdir(exist_ok=True)
+    balance = client.balance_usd()
     print(f"model      : {API_REFERENCE}")
     print(f"config     : {len(shots)} shots / {seconds}s @ "
           f"{getattr(film, 'RESOLUTION', '1080p')} {getattr(film, 'RATIO', '21:9')}")
     print(f"estimate   : ≈ ${seconds * EST_USD_PER_SECOND:.2f}")
-    print(f"balance    : ${client.balance_usd():.2f}")
+    if balance is not None:
+        print(f"balance    : ${balance:.2f}")
     if not args.yes and input("proceed? [y/N] ").strip().lower() not in {"y", "yes"}:
         return 1
 
     started = datetime.now(timezone.utc)
     with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
-        paths = list(pool.map(lambda s: render(client, film, s, refs, out_dir), shots))
+        results = list(pool.map(lambda s: render(client, film, s, refs, out_dir), shots))
 
+    paths = [p for p, _ in results]
+    spent = sum(c for _, c in results)
     done = [p for p in paths if p]
     elapsed = (datetime.now(timezone.utc) - started).seconds
-    print(f"\n{len(done)}/{len(shots)} rendered in {elapsed // 60}m{elapsed % 60}s")
+    print(f"\n{len(done)}/{len(shots)} rendered in {elapsed // 60}m{elapsed % 60}s, "
+          f"spent ${spent:.2f}")
     if len(done) != len(shots):
         missing = [s["id"] for s, p in zip(shots, paths) if not p]
         print(f"retry: --shots {','.join(missing)}", file=sys.stderr)

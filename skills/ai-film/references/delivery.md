@@ -42,24 +42,42 @@ Put `+faststart` in the share-encode step permanently.
 
 ---
 
-## Two encodes, always
+## Three tiers, always — `deliver.py`
 
-| Encode | Settings | For |
-|---|---|---|
-| Master | `-preset slow -crf 16 -c:a aac -b:a 192k` | archive, further work |
-| Share | `-preset slow -crf 23 -c:a aac -b:a 160k -movflags +faststart` | links, email |
+| Tier | Video | Audio | For |
+|---|---|---|---|
+| `MASTER` | **stream copy** of the CRF 14 cut (`-tune grain` if grainy) | two-pass linear loudnorm, 256k | archive, further work |
+| `full` | CRF 19, full resolution, `-tune grain` | 192k | what people should actually watch |
+| `share` | 720p (never upscaled), CRF 23, stepped up to fit `--share-mb` | 128k | chat, email, upload caps |
 
-A 195 s 21:9 1080p film: master ~110 MB, share ~48 MB. The share encode is what
-gets uploaded — the upload endpoint rejects large files with `HTTP 413 file too
-large`.
+Measured on two ~3.5-minute films:
+
+| Film | MASTER | full | share |
+|---|---|---|---|
+| 1.33:1 monochrome, heavy grain | 967 MB | 179 MB | 23 MB |
+| 2.33:1 colour, light grain | 266 MB | 96 MB | 25 MB |
+
+**Why `-tune grain`:** at default tuning x264 treats film grain as noise and smooths
+it, which kills the texture and lets the banding the grain was hiding come back.
+Moving the monochrome master from CRF 17 to CRF 14 with `-tune grain` took it from
+about 200 MB to about 910 MB for the same 3:36 cut; that size is retained grain and
+shadow detail, not waste.
+
+**Why stream-copy the master:** normalising loudness does not need to touch the
+picture. Copying keeps the master first-generation.
+
+**Size the share tier to the channel.** Attachment limits vary — 25 MB for email,
+~30 MB in some chat tools, ~50 MB for a CDN upload endpoint (`HTTP 413 file too
+large`). A 171 MB file cannot be sent where 30 MB is the limit; say so, and send the
+share tier alongside the path to the full one.
 
 ---
 
 ## Hosting and links
 
 ```python
-from pika_api.uploads import upload_file
-url = upload_file(PikaClient(load_config()), Path("share.mp4"))
+from pika_client import Pika
+url = Pika().upload("film-share.mp4")
 # → https://cdn.pika.art/... , publicly readable, no auth, supports range requests
 ```
 

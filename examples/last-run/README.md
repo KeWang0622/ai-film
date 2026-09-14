@@ -20,6 +20,7 @@ cheaply and complete enough to exercise everything the skill argues for.
 | **The barrier ladder** | the fare box, the yellow line, the mirror — and nothing at all in the final shot |
 | **Uneven durations** | 8 / 14 / 10 / 14 / 16 / 10 / 12 — uniform lengths read like slides |
 | **Transitions as narrative** | 3 of 6 boundaries are hard cuts; the route cancellation arrives without warning |
+| **A causal chain, linted** | `CAUSAL_CHAIN` pairs each fact with the line that says it. The first draft never said the route was ending — the notice is deliberately unreadable, so nothing did. The stranger audit caught it; 03 now says *"Last run is Friday."* |
 
 ## Running it
 
@@ -27,7 +28,8 @@ cheaply and complete enough to exercise everything the skill argues for.
 cd ../../skills/ai-film/templates
 cp ../../../examples/last-run/shots_lastrun.py .
 
-./check_script.py --project lastrun        # free
+./check_script.py --project lastrun          # free
+./check_script.py --project lastrun --script # read only the dialogue, as a stranger
 ./generate.py    --project lastrun --dry-run
 ```
 
@@ -40,6 +42,11 @@ You will need a `refs.json` in the templates directory with two entries:
 }
 ```
 
-Two photographs per person, at different angles and lighting. One photograph degrades
-into a *type* rather than a person. Use your own photographs with consent, or generate
+Name photos `refs/<key>-1.jpg`, `refs/<key>-2.jpg` and print that map with
+`./pika_client.py upload refs/*.jpg > refs.json`.
+Set `PIKA_API_KEY` first.
+
+Two photographs per person, at different angles and lighting, is best. A single *wide*
+photograph degrades into a *type* rather than a person; a single clean frontal one can
+hold if the face stays large and front-on. Use your own photographs with consent, or generate
 original faces — do not cast a real public figure.

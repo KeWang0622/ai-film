@@ -260,7 +260,7 @@ SHOTS: list[dict] = [
             "person speaks at a time. Three short lines, strictly in this order, with a clear "
             "pause between each. They talk while working, the way two people talk about a job.\n"
             '1. FIRST VOICE: "Every window?"\n'
-            '2. SECOND VOICE: "Every window."\n'
+            '2. SECOND VOICE: "Every window. Last run is Friday."\n'
             '3. FIRST VOICE, after a beat: "Nobody reads them."\n'
             "Nobody else says anything. ABSOLUTELY NO music of any kind."
         ),
@@ -369,6 +369,15 @@ SHOTS: list[dict] = [
 ]
 
 TOTAL_S = sum(s["duration"] for s in SHOTS)  # 84
+
+# What a stranger needs, and the line that says it. check_script.py errors on any
+# fact nobody speaks. The first draft of this film never said the route was ending:
+# the notice is deliberately unreadable, so nothing did.
+CAUSAL_CHAIN = [
+    ("they see each other every night",   "See you tomorrow."),
+    ("the route is being discontinued",   "Last run is Friday."),
+    ("he lets her keep the ticket whole", "You forgot."),
+]
 
 # ~95% hard cuts. Dip to black only for a time ellipsis or an act boundary.
 # Note the deliberate hard cut into the notice shot: the route being cancelled

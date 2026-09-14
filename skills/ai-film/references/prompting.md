@@ -146,6 +146,14 @@ Write delivery direction inline:
 | Two shots look like the same composition | no per-shot LENS/FOREGROUND | differentiate deliberately |
 | `provider_timeout: exceeded max lifetime` after ~1205s | server-side ~20 min ceiling; hit by the heaviest shot in a batch | **just retry** — same prompt usually passes (528s vs 1208s observed). Simplify only if it fails twice |
 | Reference-photo accessories bleed into the character | the photo's tiara/jewellery/styling carried into an incompatible scene | state the character's condition explicitly in that shot: "no tiara, no jewellery in her hair, hair salt-stiff and dishevelled, coat soaked and stained" |
+| A dark, murky blur where a sequence of images was asked for | several subjects or places in one generation ("a series of framings… then finds…") | ONE sustained image, one move; split the rest into shots |
+| A second weapon appears | the weapon placed by frame position ("low in the corner of frame") | "EXACTLY ONE revolver, the one in her two hands; no other weapon anywhere in frame" |
+| Strangers' faces on the wall | framed photographs requested as set dressing | dress the wall with something that has no face |
+| A fight scene comes back as a mild scuffle | destruction described as an event to perform | describe it as a state the shot OPENS in: "already a wreck in the first frame" |
+| Attackers read as shoppers | threat written as "distant shapes" | make it legible: weapons up, advancing, still at distance, faces unreadable |
+| A monochrome end card measures as colour | a colour word on the card ("cream card") | black field, white letters — monochrome by construction |
+| Both leads change costume in one rerun | a longer prompt displaced the wardrobe | restate wardrobe in that shot as "WARDROBE CONTINUITY — unchanged from every other scene" |
+| A key line is thrown away | one line of four in a 12 s shot | its own shot, ≤3 lines, silence directed before and after (see story.md) |
 
 ---
 
@@ -289,3 +297,69 @@ lines.append(f"{tags} {verb} {override.get(who, PEOPLE[who])}")
 Then also fix any *other* block that restates the thing — the anti-swap block was
 still saying "the one with the gold band on his forehead" and pulled it straight
 back in. Grep the assembled prompt for the attribute you are removing.
+
+---
+
+# Additions from two remakes
+
+## Copy-ready: pacing and a line that must land
+
+```python
+KEY_LINE = (
+    "PACING - CRITICAL: spoken VERY SLOWLY. A LONG SILENCE of several seconds before "
+    "the first line, a clear pause between lines, and a LONG SILENCE after the last "
+    "line in which nobody speaks and nobody moves. The silences are as important as "
+    "the words. "
+    "The line '<LINE>' is the most important line in the film: spoken CLEARLY and "
+    "DISTINCTLY, every word fully articulated at normal volume - not muttered, not "
+    "rushed, not swallowed at the end. "
+)
+```
+
+Verify the silence rather than trusting it: speech-band energy in 0.25 s windows
+shows where the voice actually is. The first build of a shot with this block measured
+3.5 s silent, the line, 4.25 s silent, then two short replies.
+
+## Copy-ready: a setting several shots share
+
+When a sequence spans shots, write the place and the wardrobe as constants and
+concatenate them into every shot of the sequence, the same way a prop or a character
+gets a block. It keeps the fog, the aeroplane and the hats identical from cut to cut:
+
+```python
+AIRFIELD = (
+    "THE AIRFIELD: night, thick low fog rolling across a wet concrete apron. A "
+    "twin-engine 1940s passenger aeroplane stands a little way off with its propellers "
+    "turning and its cabin windows lit, a boarding ladder down and one ground crewman "
+    "moving about it at distance. A hangar and a small control tower are dim shapes "
+    "behind the fog; a bank of lamps throws hard beams through it. "
+)
+```
+
+## Unseen characters, written so they stay unseen
+
+A third lead nobody casts costs nothing and holds no likeness. It needs the absence
+written as positively as a presence:
+
+```
+VIKTOR IS NEVER SEEN: a hand on her shoulder, a dark sleeve, a felt hat on the
+chair beside her, and a voice. Never his head, never his face, never his body.
+```
+
+The same pattern carried a therapist ("a calm voice from just behind the camera —
+never a head, never a shoulder, never a reflection"), a police chief (a uniform
+sleeve and a glass at the edge of frame) and a target (a broad silhouette at the far
+end of a dock that leaves frame almost at once).
+
+## Title and end cards that read
+
+Rendered text is reliable when the layout is physical and the words are few:
+
+- one or two words, dead centre, equal empty space on every side, "correct, complete
+  and entirely unobstructed", "no other writing anywhere in frame";
+- a camera move that **ends** locked off on the text — a tilt down a sunlit wall to
+  a stencilled sign, a slow track along a bare wall to an engraved brass plate;
+- for monochrome films, a black field and white letters rather than a coloured card.
+
+A short name on a brass plate and one word on a stencilled sign both rendered
+legibly first time. The failure was elsewhere in the frame: photographs on the same wall.

@@ -2,6 +2,12 @@
 """Lint a shot script against the failure catalogue, before you spend anything.
 
     ./check_script.py --project demo
+    ./check_script.py --project demo --script   print every spoken line, in order
+
+Read the --script output as someone who has never heard of the film. That is
+the audit that found a flashback whose city was not named until five shots
+later, a lead whose name was never spoken once, and an ending where two
+tickets somehow carried three people.
 
 Every check here corresponds to a defect that reached a finished film. They are
 cheap to run and each one has, at least once, been worth a whole batch.
@@ -29,6 +35,20 @@ CPS_CJK = 4.5
 CPS_LATIN = 13.0
 LINE_GAP = 0.7
 DENSITY_WARN = 0.85
+
+# Seedance returns 422 above this, and in a batch the shot just never renders.
+PROMPT_LIMIT = 15000
+PROMPT_WARN = 13000
+
+# A multi-location or multi-subject "drift" inside one generation came back as a
+# dark blur, twice. One generation is one image.
+MONTAGE = re.compile(r"(?<!no )(?:series of|montage|intercut|cuts? to|then (?:finds|cuts))", re.I)
+# A weapon placed by its position in frame rather than by whose hands hold it
+# produced a second weapon.
+WEAPON = re.compile(r"\b(pistol|revolver|gun|rifle|shotgun|knife|sword|dagger)s?\b", re.I)
+# Framed photographs as set dressing come back as invented strangers' faces.
+PHOTO_DRESSING = re.compile(r"framed (?:family )?photo|photographs? (?:on|along|of the)|"
+                            r"family photo|portrait on the wall", re.I)
 
 QUOTED = re.compile(r"「([^」]*)」|\"([^\"]*)\"|“([^”]*)”")
 NUMBERED = re.compile(r"^\s*\d+\.")
@@ -97,6 +117,24 @@ def check(film, r: Report) -> None:
 
         if not 4 <= dur <= 30:
             r.error(f"{sid}: duration {dur}s is outside the 4-30s the endpoint accepts")
+
+        if len(prompt) > PROMPT_LIMIT:
+            r.error(f"{sid}: assembled prompt is {len(prompt)} chars; the endpoint 422s "
+                    f"above {PROMPT_LIMIT} and the shot silently never renders")
+        elif len(prompt) > PROMPT_WARN:
+            r.warn(f"{sid}: prompt is {len(prompt)} chars, close to the {PROMPT_LIMIT} cap; "
+                   f"and every block you add weakens the ones already there")
+
+        action_text = s["action"]
+        if MONTAGE.search(action_text):
+            r.warn(f"{sid}: reads like a montage inside one generation "
+                   f"('{MONTAGE.search(action_text).group(0)}'); rewrite as ONE sustained image")
+        if WEAPON.search(action_text) and "EXACTLY" not in action_text.upper():
+            r.warn(f"{sid}: a weapon with no headcount; write 'exactly one <weapon>, the one in "
+                   f"<name>'s hands' - placing it by frame position spawns a second")
+        if PHOTO_DRESSING.search(action_text):
+            r.warn(f"{sid}: photographs as set dressing render as invented strangers' faces; "
+                   f"dress the wall with something that has no face")
 
         # The music ban is not stylistic. Without it the model composes a score,
         # the score trips a copyright fingerprint, and the job is rejected AFTER
@@ -180,6 +218,27 @@ def check(film, r: Report) -> None:
     if getattr(film, "NAME_CARDS", []):
         r.note(f"{len(film.NAME_CARDS)} burned-in cards registered")
 
+    spoken = " ".join(ln for s in shots for ln in spoken_lines(s["dialogue"]))
+
+    # Every lead must be named aloud. In one film the heroine's name was never
+    # spoken in 3.5 minutes; the hero's was said four times.
+    for key, desc in getattr(film, "PEOPLE", {}).items():
+        name = re.split(r"\s[—-]\s", desc, maxsplit=1)[0].strip()
+        # Role names ("THE DRIVER") are a deliberate choice, not a missing name.
+        if re.match(r"^(the|a|an)\s", name, re.I):
+            continue
+        if name and not name.startswith("<") and name.lower() not in spoken.lower():
+            r.warn(f"'{name}' is never spoken aloud; a first-time viewer cannot learn the name")
+
+    # The causal chain, checked. Each entry is (fact, a phrase that must be spoken).
+    # If an arrow is not said out loud somewhere, the audience does not have it.
+    for fact, phrase in getattr(film, "CAUSAL_CHAIN", []):
+        if phrase.lower() not in spoken.lower():
+            r.error(f"causal chain broken - never spoken: {fact!r} (looked for {phrase!r})")
+    if not getattr(film, "CAUSAL_CHAIN", []):
+        r.warn("no CAUSAL_CHAIN declared; list the facts a first-time viewer needs and the "
+               "line that says each one")
+
 
 class _Refs(dict):
     """Stand-in refs.json so the script can be linted without any uploads."""
@@ -208,9 +267,18 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Lint a shot script before spending.")
     parser.add_argument("--project", required=True)
     parser.add_argument("--strict", action="store_true", help="treat warnings as errors")
+    parser.add_argument("--script", action="store_true",
+                        help="print every spoken line in order - read it as a stranger")
     args = parser.parse_args(argv)
 
     film = importlib.import_module(f"shots_{args.project}")
+    if args.script:
+        for s in film.SHOTS:
+            lines = spoken_lines(s["dialogue"])
+            print(f"{s['id']}  ({s['duration']}s)" + ("" if lines else "   [no dialogue]"))
+            for ln in lines:
+                print(f"    {ln}")
+        return 0
     r = Report()
     check(film, r)
 
